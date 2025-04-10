@@ -5,11 +5,17 @@ import datetime
 import os
 
 FILENAME = "診療記録.csv"
+is_editing = False
+editing_target = None
 
 def delete_selected():
     selected = tree.selection()
     if not selected:
         messagebox.showwarning("選択なし", "削除する行を選択してください。")
+        return
+
+    confirm = messagebox.askyesno("確認", "本当にこの行を削除しますか？")
+    if not confirm:
         return
 
     values = tree.item(selected[0], "values")
@@ -24,37 +30,37 @@ def delete_selected():
                 new_rows.append(row)
 
     with open(FILENAME, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
         writer.writerows(new_rows)
 
     messagebox.showinfo("削除完了", "選択された行を削除しました。")
     load_data()
 
 def edit_selected():
+    global is_editing, editing_target
     selected = tree.selection()
     if not selected:
         messagebox.showwarning("選択なし", "編集する行を選択してください。")
         return
 
-    values = tree.item(selected[0], "values")
+    editing_target = tree.item(selected[0], "values")
+    is_editing = True
 
     # 入力欄にデータをセット
     entry_date.delete(0, tk.END)
-    entry_date.insert(0, values[0])
+    entry_date.insert(0, editing_target[0])
     entry_name.delete(0, tk.END)
-    entry_name.insert(0, values[1])
+    entry_name.insert(0, editing_target[1])
     entry_patient_no.delete(0, tk.END)
-    entry_patient_no.insert(0, values[2])
+    entry_patient_no.insert(0, editing_target[2])
     entry_age.delete(0, tk.END)
-    entry_age.insert(0, values[3])
-    gender_var.set(values[4])
+    entry_age.insert(0, editing_target[3])
+    gender_var.set(editing_target[4])
     text_symptoms.delete("1.0", tk.END)
-    text_symptoms.insert(tk.END, values[5])
+    text_symptoms.insert(tk.END, editing_target[5])
     entry_diagnosis.delete(0, tk.END)
-    entry_diagnosis.insert(0, values[6])
-
-    # TreeviewとCSVから元データを削除
-    delete_selected()
+    entry_diagnosis.insert(0, editing_target[6])
+    btn_save.config(text="更新")
 
 def duplicate_selected():
     selected = tree.selection()
@@ -79,6 +85,8 @@ def duplicate_selected():
     entry_diagnosis.insert(0, values[6])
 
 def submit():
+    global is_editing, editing_target
+    btn_save.config(text="保存")
     date = entry_date.get()
     name = entry_name.get()
     patient_no = entry_patient_no.get()
@@ -88,9 +96,43 @@ def submit():
     diagnosis = entry_diagnosis.get()
     updated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # 日付形式の検証
+    try:
+        datetime.datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        messagebox.showerror("日付エラー", "診療日はYYYY-MM-DD形式で入力してください。")
+        return
+
+    # 数値入力の検証
+    if not patient_no.isdigit():
+        messagebox.showerror("入力エラー", "患者Noは数字で入力してください。")
+        return
+    if not age.isdigit():
+        messagebox.showerror("入力エラー", "年齢は数字で入力してください。")
+        return
+
     if not (date and name and patient_no and age and gender and symptoms and diagnosis):
         messagebox.showwarning("未入力", "すべての項目を入力してください。")
         return
+
+    global is_editing, editing_target
+    if is_editing and editing_target:
+        # 既存データから対象行を削除
+        filtered_rows = []
+        if os.path.exists(FILENAME):
+            with open(FILENAME, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if tuple(row) != tuple(editing_target):
+                        filtered_rows.append(row)
+
+        with open(FILENAME, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+            writer.writerows(filtered_rows)
+
+        is_editing = False
+        editing_target = None
+        btn_save.config(text="保存")
 
     # CSV全体を読み込み直して重複をチェック
     existing_rows = []
@@ -105,13 +147,17 @@ def submit():
 
     # CSV保存
     with open(FILENAME, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
         writer.writerow(new_row)
 
     # Treeview更新
     load_data()
 
-    # 入力リセット
+    reset_form()
+
+    messagebox.showinfo("保存完了", "診療内容を保存しました。")
+
+def reset_form():
     entry_date.delete(0, tk.END)
     entry_date.insert(0, datetime.date.today().isoformat())
     entry_name.delete(0, tk.END)
@@ -120,8 +166,7 @@ def submit():
     gender_var.set(None)
     text_symptoms.delete("1.0", tk.END)
     entry_diagnosis.delete(0, tk.END)
-
-    messagebox.showinfo("保存完了", "診療内容を保存しました。")
+    btn_save.config(text="保存")
 
 def search_data():
     keyword = entry_search.get().strip()
@@ -151,6 +196,14 @@ def load_data():
             for row in reader:
                 tree.insert("", tk.END, values=row)
 
+    # 各列の幅を自動調整
+    font = ("TkDefaultFont", 10)
+    for i, col in enumerate(columns):
+        max_width = max(
+            [len(tree.set(item, col)) for item in tree.get_children()] + [len(col)]
+        )
+        tree.column(col, width=min(max_width * 10 + 20, 200))  # 最大幅を200pxに制限
+
 def sort_treeview(col, reverse):
     data = [(tree.set(k, col), k) for k in tree.get_children("")]
     try:
@@ -173,12 +226,12 @@ def show_selected(event=None):
 
     values = tree.item(selected[0], "values")
     info = (
-        f"📅 診療日: {values[0]}\n"
-        f"👤 名前: {values[1]}\n"
-        f"🆔 患者No: {values[2]}\n"
-        f"🎂 年齢: {values[3]}\n"
+        f"📅 診療日: {values[0]} "
+        f"👤 名前: {values[1]} "
+        f"🆔 患者No: {values[2]} "
+        f"🎂 年齢: {values[3]} "
         f"⚧ 性別: {values[4]}\n"
-        f"🤒 主訴・症状:\n{values[5]}\n"
+        f"🤒 主訴・症状:{values[5]}\n"
         f"🩺 診断名: {values[6]}\n"
         f"🕒 更新日時: {values[7]}"
     )
@@ -198,7 +251,7 @@ def toggle_treeview():
 # メインウィンドウ
 root = tk.Tk()
 root.title("診療入力フォーム v1.0")
-root.geometry("1000x700")
+root.geometry("800x700")
 
 # ===== 入力欄エリア =====
 frame_input = tk.LabelFrame(root, text="📝 診療入力")
@@ -258,23 +311,14 @@ tk.Label(frame_buttons, text="検索ワード").pack(side=tk.LEFT, padx=5)
 entry_search = tk.Entry(frame_buttons, width=30)
 entry_search.pack(side=tk.LEFT, padx=5)
 tk.Button(frame_buttons, text="検索", command=search_data).pack(side=tk.LEFT, padx=5)
-tk.Button(frame_buttons, text="保存", command=submit).pack(side=tk.LEFT, padx=5)
+btn_save = tk.Button(frame_buttons, text="保存", command=submit)
+btn_save.pack(side=tk.LEFT, padx=5)
 tk.Button(frame_buttons, text="削除", command=delete_selected).pack(side=tk.LEFT, padx=5)
 tk.Button(frame_buttons, text="編集", command=edit_selected).pack(side=tk.LEFT, padx=5)
 tk.Button(frame_buttons, text="複製", command=duplicate_selected).pack(side=tk.LEFT, padx=5)
 
-# ===== Treeviewエリア =====
-frame_tree = tk.Frame(root)
-frame_tree.pack(padx=10, pady=10, fill="both", expand=True)
-
-columns = ("診療日", "名前", "患者No", "年齢", "性別", "症状", "診断名", "更新日時")
-tree = ttk.Treeview(frame_tree, columns=columns, show="headings", height=5)
-
-for col in columns:
-    tree.heading(col, text=col, command=lambda c=col: sort_treeview(c, False))
-    tree.column(col, width=100 if col not in ("症状", "更新日時") else 200)
-
-tree.pack(fill="both", expand=True)
+btn_toggle_tree = tk.Button(root, text="📂 診療記録を非表示", command=toggle_treeview)
+btn_toggle_tree.pack(pady=(0, 5))
 
 # 参照表示エリア
 frame_view = tk.LabelFrame(root, text="診療内容（参照）")
@@ -284,11 +328,33 @@ text_view = tk.Text(frame_view, height=8, wrap="word")
 text_view.pack(fill="both", expand=True, padx=10, pady=5)
 text_view.config(state="disabled")
 
+# ===== Treeviewエリア =====
+frame_tree = tk.Frame(root)
+frame_tree.pack(padx=10, pady=10, fill="both", expand=True)
+
+scrollbar = tk.Scrollbar(frame_tree)
+scrollbar.pack(side="right", fill="y")
+
+columns = ("診療日", "名前", "患者No", "年齢", "性別", "症状", "診断名", "更新日時")
+tree = ttk.Treeview(frame_tree, columns=columns, show="headings", height=5, yscrollcommand=scrollbar.set)
+
+for col in columns:
+    tree.heading(col, text=col, command=lambda c=col: sort_treeview(c, False))
+    tree.column(col, width=100 if col not in ("症状", "更新日時") else 200)
+
+tree.pack(fill="both", expand=True)
+scrollbar.config(command=tree.yview)
+
 # データ読み込み
 load_data()
 tree.bind("<<TreeviewSelect>>", show_selected)
 
-btn_toggle_tree = tk.Button(root, text="📂 診療記録を非表示", command=toggle_treeview)
-btn_toggle_tree.pack()
+def on_close():
+    if is_editing:
+        if not messagebox.askyesno("確認", "編集内容が保存されていません。終了しますか？"):
+            return
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_close)
 
 root.mainloop()
