@@ -8,6 +8,18 @@ FILENAME = "診療記録.csv"
 is_editing = False
 editing_target = None
 
+def backup_csv():
+    import shutil
+
+    backup_dir = "backup"
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_filename = os.path.join(backup_dir, f"診療記録_{timestamp}.csv")
+    if os.path.exists(FILENAME):
+        shutil.copy(FILENAME, backup_filename)
+
 def delete_selected():
     selected = tree.selection()
     if not selected:
@@ -146,6 +158,7 @@ def submit():
         messagebox.showwarning("重複警告", "このデータは既に存在しますが、保存を続行します。")
 
     # CSV保存
+    backup_csv()
     with open(FILENAME, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_ALL)
         writer.writerow(new_row)
